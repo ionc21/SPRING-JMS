@@ -60,6 +60,7 @@ local.properties
 *.orig
 classes/
 
+!.idea/runConfigurations
 ######################
 # Visual Studio Code
 ######################
