@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:jms="http://www.springframework.org/schema/jms"
+       xmlns:jee="http://www.springframework.org/schema/jee"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/jms
+       http://www.springframework.org/schema/jms/spring-jms.xsd
+       http://www.springframework.org/schema/jee
+       http://www.springframework.org/schema/jee/spring-jee.xsd
+       http://www.springframework.org/schema/context
+       http://www.springframework.org/schema/context/spring-context.xsd">
+
+
+    <context:property-placeholder
+            location="classpath:example.properties"
+            ignore-resource-not-found="true"/>
+
+
+    <bean id="activeMqConnectionFactory"
+          class="org.apache.activemq.ActiveMQConnectionFactory">
+        <constructor-arg index="0"
+                         value="${spring.activemq.url:tcp://localhost:61616}"/>
+        <property name="prefetchPolicy.queuePrefetch" value="1"/>
+        <property name="redeliveryPolicy.useExponentialBackOff" value="true" />
+        <property name="redeliveryPolicy.maximumRedeliveries" value="4"/>
+    </bean>
+
+    <bean id="cachingConnectionFactory"
+          class="org.springframework.jms.connection.CachingConnectionFactory">
+        <property name="targetConnectionFactory" ref="activeMqConnectionFactory" />
+        <property name="reconnectOnException" value="true" />
+        <property name="cacheConsumers" value="true" />
+        <property name="cacheProducers" value="true" />
+    </bean>
+
+    <!--
+        If running Spring inside a JEE container then you
+        should use the connection factory
+        provided by the JEE server using a jndi lookup -->
+    <!-- <jee:jndi-lookup id="connectionFactory"
+            jndi-name="jms/ConnectionFactory"/> -->
+
+    <bean id="messageConverter"
+          class="org.springframework.jms.support.converter.MappingJackson2MessageConverter">
+        <property name="objectMapper" ref="objectMapper" />
+        <property name="targetType" value="TEXT"/>
+        <property name="typeIdPropertyName" value="_messageType" />
+    </bean>
+
+    <bean id="queueJmsTemplate"
+          class="org.springframework.jms.core.JmsTemplate">
+        <property name="connectionFactory" ref="cachingConnectionFactory"/>
+        <property name="messageConverter" ref="messageConverter" />
+    </bean>
+
+    <bean id="topicJmsTemplate"
+          class="org.springframework.jms.core.JmsTemplate">
+        <property name="connectionFactory" ref="cachingConnectionFactory"/>
+        <property name="messageConverter" ref="messageConverter" />
+        <property name="pubSubDomain" value="true" />
+    </bean>
+
+
+    <bean id="emailsJmsTemplate"
+          class="org.springframework.jms.core.JmsTemplate">
+        <property name="connectionFactory" ref="cachingConnectionFactory"/>
+        <property name="messageConverter" ref="messageConverter" />
+        <property name="defaultDestinationName" value="Emails" />
+        <property name="priority" value="10"/>
+        <!--<property name="timeToLive" value="5000"/>-->
+        <property name="explicitQosEnabled" value="true"/>
+    </bean>
+
+    <bean id="ordersJmsTemplate"
+          class="org.springframework.jms.core.JmsTemplate">
+        <property name="connectionFactory" ref="cachingConnectionFactory"/>
+        <property name="messageConverter" ref="messageConverter" />
+        <property name="pubSubDomain" value="true" />
+        <property name="defaultDestinationName" value="Orders" />
+    </bean>
+
+    <!-- If not using different QoS requirements throughout your application
+        then only the following jmsTemplates may be required -->
+
+    <bean id="objectMapper" class="com.fasterxml.jackson.databind.ObjectMapper" />
+
+    <bean id="emailGenerator" class="com.pluralsight.practicaljms.EmailGenerator"
+          init-method="start"
+          destroy-method="stop">
+        <property name="jmsTemplate" ref="emailsJmsTemplate" />
+    </bean>
+
+    <bean id="orderGenerator"
+          class="com.pluralsight.practicaljms.OrderGenerator"
+          init-method="start"
+          destroy-method="stop">
+        <property name="jmsTemplate" ref="ordersJmsTemplate" />
+    </bean>
+
+
+
+
+
+
+
+
+    <bean id="emailsMessageListener"
+          class="com.pluralsight.practicaljms.EMailMessageListener"/>
+
+
+    <jms:listener-container
+            factory-id="queue-container-factory"
+            connection-factory="activeMqConnectionFactory"
+            message-converter="messageConverter"
+            concurrency="3-10"
+            acknowledge="transacted">
+        <jms:listener destination="Emails"
+                      ref="emailsMessageListener"
+                      method="onMessage"
+                      />
+    </jms:listener-container>
+
+
+
+
+
+
+
+
+
+
+
+    <bean id="ordersMessageListener"
+          class="com.pluralsight.practicaljms.OrderMessageListener"/>
+
+
+    <jms:listener-container
+            factory-id="durable-topic-container-factory"
+            connection-factory="activeMqConnectionFactory"
+            message-converter="messageConverter"
+            concurrency="1-1"
+            client-id="${spring.clientId:default_clientId}"
+            destination-type="durableTopic"
+            acknowledge="transacted">
+        <jms:listener destination="Orders"
+                      ref="ordersMessageListener"
+                      subscription="testSubscription"/>
+    </jms:listener-container>
+
+
+
+
+
+
+    <bean id="correlationIdMessageListener" class="com.pluralsight.practicaljms.CorrelationIdReplyMessageListener">
+        <property name="jmsTemplate" ref="queueJmsTemplate"/>
+        <property name="messageConverter" ref="messageConverter" />
+    </bean>
+
+    <!--<bean id="synchronousMessaging" class="com.pluralsight.practicaljms.SynchronousMessaging"-->
+          <!--init-method="start"-->
+          <!--destroy-method="stop">-->
+        <!--<property name="jmsTemplate" ref="queueJmsTemplate" />-->
+    <!--</bean>-->
+
+    <jms:listener-container
+            factory-id="synchronous-container-factory"
+            connection-factory="activeMqConnectionFactory"
+            message-converter="messageConverter"
+            concurrency="3-10"
+            acknowledge="transacted">
+        <jms:listener destination="REQUEST_QUEUE"
+                      ref="correlationIdMessageListener"
+                      method="onMessage"/>
+    </jms:listener-container>
+
+</beans>
